@@ -131,7 +131,10 @@ def _parse_dt(value: str, tzid: Optional[str]) -> dt.datetime:
     value = value.strip()
     if re.fullmatch(r"\d{8}", value):
         d = dt.datetime.strptime(value, "%Y%m%d").date()
-        return dt.datetime(d.year, d.month, d.day, 0, 0, tzinfo=ZoneInfo(tzid) if tzid else KYIV_TZ)
+        return dt.datetime(
+            d.year, d.month, d.day, 0, 0,
+            tzinfo=ZoneInfo(tzid) if tzid else KYIV_TZ
+        )
 
     if value.endswith("Z"):
         base = dt.datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc)
@@ -154,6 +157,7 @@ def parse_ics_events(ics_text: str) -> List[Event]:
         nonlocal cur
         if not cur:
             return
+
         dtstart_tz, dtstart_val = cur.get("DTSTART", (None, ""))
         dtend_tz, dtend_val = cur.get("DTEND", (None, ""))
         summary = cur.get("SUMMARY", (None, ""))[1]
@@ -257,6 +261,7 @@ def split_summary(summary: str) -> Tuple[str, Optional[str]]:
         for k, v in TYPE_WORDS.items():
             if k in tail:
                 return ("—".join(parts[:-1]).strip(), v)
+
     # also try '-' dash
     parts2 = [p.strip() for p in s.split("-")]
     if len(parts2) >= 2:
@@ -326,9 +331,7 @@ def extract_teacher(description: str) -> Optional[str]:
 def extract_passcode(description: str) -> Optional[str]:
     if not description:
         return None
-    # normalize
     t = description.replace("\\n", "\n")
-    # common variants
     patterns = [
         r"(?:Код доступу|Код доступа|Passcode|Пароль)\s*[:\-]?\s*([A-Za-zА-Яа-я0-9\-_]+)",
     ]
@@ -346,7 +349,6 @@ def classify_place(location: str, description: str) -> str:
     blob = f"{location}\n{description}".lower()
     # online hints
     if "online" in blob or "zoom" in blob:
-        # sometimes includes "(ауд. 207)"
         m = re.search(r"(ауд\.?\s*\d+)", blob, flags=re.IGNORECASE)
         if m:
             return f"🌐 Online (Zoom) • 🏫 {m.group(1).replace('ауд', 'ауд.').strip()}"
@@ -401,7 +403,6 @@ def get_weather_dnipro(day: dt.date) -> Optional[Dict]:
 
 
 def weathercode_ua(code: int) -> str:
-    # minimal mapping (enough to be useful)
     mapping = {
         0: "ясно",
         1: "переважно ясно",
@@ -470,7 +471,6 @@ def escape_html(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-# LINK FIX: proper escaping for href attribute
 def escape_html_attr(s: str) -> str:
     return escape_html(s).replace('"', "&quot;")
 
@@ -478,7 +478,7 @@ def escape_html_attr(s: str) -> str:
 def format_day(events: List[Event], day: dt.date) -> str:
     lines = []
     lines.append(day_header(day))
-    lines.append("")  # empty line
+    lines.append("")
 
     if not events:
         lines.append("— (пар немає)")
@@ -490,7 +490,6 @@ def format_day(events: List[Event], day: dt.date) -> str:
         passcode = extract_passcode(ev.description)
         place = classify_place(ev.location, ev.description)
 
-        # LINK FIX: use strict extractor (prevents Cyrillic sticking)
         links = extract_zoom_links(ev.description + "\n" + ev.location)
         link = links[0] if links else None
 
@@ -502,34 +501,20 @@ def format_day(events: List[Event], day: dt.date) -> str:
             lines.append(f"👩‍🏫 {escape_html(teacher)}")
         lines.append(escape_html(place))
 
-        # LINK FIX: show explicit clickable label instead of raw URL
         if link:
             href = escape_html_attr(link)
             lines.append(f'🔗 <a href="{href}">Відкрити Zoom</a>')
-            # optional: show URL in <code> for copy/paste without Telegram auto-link glue
             lines.append(f"📎 <code>{escape_html(link)}</code>")
 
         if passcode:
             lines.append(f"🔑 Код доступу: <b>{escape_html(passcode)}</b>")
 
-        lines.append("")  # blank line between pairs
+        lines.append("")
 
     while lines and lines[-1] == "":
         lines.pop()
 
     return "\n".join(lines)
-
-
-def format_today_message(events: List[Event], day: dt.date) -> str:
-    header = f"<b>Доброго ранку шановні студенти!</b> ☀️\n🗓️ <b>Розклад на сьогодні ({fmt_date_short(day)})</b>\n\n"
-    body = format_day(events, day)
-    return header + body + f"\n\n⏱️ Оновлено: {now_kyiv().strftime('%H:%M')}"
-
-
-def format_tomorrow_message(events: List[Event], day: dt.date) -> str:
-    header = f"<b>Добрий вечір шановні студенти!</b> 🌙\n🗓️ <b>Розклад на завтра ({fmt_date_short(day)})</b>\n\n"
-    body = format_day(events, day)
-    return header + body + f"\n\n⏱️ Оновлено: {now_kyiv().strftime('%H:%M')}"
 
 
 def format_week_message(events: List[Event], start_day: dt.date, end_day: dt.date) -> str:
@@ -538,7 +523,9 @@ def format_week_message(events: List[Event], start_day: dt.date, end_day: dt.dat
         f"<b>{fmt_date_short(start_day)} – {fmt_date_short(end_day)}</b>\n\n"
     )
 
-    by_day: Dict[dt.date, List[Event]] = {start_day + dt.timedelta(days=i): [] for i in range((end_day - start_day).days + 1)}
+    by_day: Dict[dt.date, List[Event]] = {
+        start_day + dt.timedelta(days=i): [] for i in range((end_day - start_day).days + 1)
+    }
     for ev in events:
         by_day[ev.start.astimezone(KYIV_TZ).date()].append(ev)
 
@@ -619,7 +606,7 @@ def main():
         save_state(state)
         print("Posted today schedule.")
 
-elif args.mode == "tomorrow":
+    elif args.mode == "tomorrow":
         target = today + dt.timedelta(days=1)
         stamp = f"tomorrow:{iso_date(target)}"
         if not should_post(state, "last_tomorrow", stamp):
@@ -640,10 +627,9 @@ elif args.mode == "tomorrow":
         save_state(state)
         print("Posted tomorrow schedule.")
 
-        elif args.mode == "week":
-        # Поточний понеділок (початок "цього" тижня)
+    elif args.mode == "week":
+        # ✅ NEXT WEEK (Mon–Sun)
         this_monday = today - dt.timedelta(days=today.weekday())  # Monday=0
-        # Наступний тиждень
         next_monday = this_monday + dt.timedelta(days=7)
         next_sunday = next_monday + dt.timedelta(days=6)
 
