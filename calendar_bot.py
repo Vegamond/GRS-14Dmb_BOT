@@ -640,20 +640,20 @@ def main():
         save_state(state)
         print("Posted tomorrow schedule.")
 
-    elif args.mode == "week":
-        days_ahead = (0 - today.weekday()) % 7  # Monday=0
-        this_monday = today + dt.timedelta(days=days_ahead)
-        if today.weekday() != 6:
-            this_monday = today - dt.timedelta(days=today.weekday())
-        this_sunday = this_monday + dt.timedelta(days=6)
+        elif args.mode == "week":
+        # Поточний понеділок (початок "цього" тижня)
+        this_monday = today - dt.timedelta(days=today.weekday())  # Monday=0
+        # Наступний тиждень
+        next_monday = this_monday + dt.timedelta(days=7)
+        next_sunday = next_monday + dt.timedelta(days=6)
 
-        stamp = f"week:{iso_date(this_monday)}:{iso_date(this_sunday)}"
+        stamp = f"week:{iso_date(next_monday)}:{iso_date(next_sunday)}"
         if not should_post(state, "last_week", stamp):
             print("Already posted weekly schedule for this week-range. Exiting.")
             return
 
-        week_events = events_in_range(all_events, this_monday, this_sunday)
-        msg = format_week_message(week_events, this_monday, this_sunday)
+        week_events = events_in_range(all_events, next_monday, next_sunday)
+        msg = format_week_message(week_events, next_monday, next_sunday)
 
         if schedule_thread_id is None:
             print("WARNING: TG_SCHEDULE_THREAD_ID not set. Weekly post will go to general chat.")
@@ -661,7 +661,7 @@ def main():
 
         mark_posted(state, "last_week", stamp)
         save_state(state)
-        print("Posted weekly schedule.")
+        print("Posted weekly schedule (next week).")
 
 
 if __name__ == "__main__":
