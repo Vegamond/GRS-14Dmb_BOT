@@ -619,7 +619,7 @@ def main():
         save_state(state)
         print("Posted today schedule.")
 
-    elif args.mode == "tomorrow":
+elif args.mode == "tomorrow":
         target = today + dt.timedelta(days=1)
         stamp = f"tomorrow:{iso_date(target)}"
         if not should_post(state, "last_tomorrow", stamp):
