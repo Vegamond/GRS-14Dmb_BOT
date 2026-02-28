@@ -24,6 +24,22 @@ URL_RE = re.compile(
     re.IGNORECASE
 )
 
+# ----------------------------
+# Pair numbering by start time
+# ----------------------------
+PAIR_BY_START = {
+    "09:00": 1,
+    "10:40": 2,
+    "12:30": 3,
+    "14:10": 4,
+    "15:40": 5,
+}
+
+
+def pair_no(t: dt.datetime) -> Optional[int]:
+    s = t.astimezone(KYIV_TZ).strftime("%H:%M")
+    return PAIR_BY_START.get(s)
+
 
 # ----------------------------
 # Models
@@ -140,7 +156,6 @@ def _parse_dt(value: str, tzid: Optional[str]) -> dt.datetime:
         base = dt.datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc)
         return base.astimezone(KYIV_TZ)
 
-    # no Z
     naive = dt.datetime.strptime(value, "%Y%m%dT%H%M%S")
     tz = ZoneInfo(tzid) if tzid else KYIV_TZ
     return naive.replace(tzinfo=tz).astimezone(KYIV_TZ)
@@ -193,7 +208,6 @@ def parse_ics_events(ics_text: str) -> List[Event]:
         if not in_event:
             continue
 
-        # key(;params)?:value
         if ":" not in line:
             continue
         left, value = line.split(":", 1)
@@ -201,7 +215,6 @@ def parse_ics_events(ics_text: str) -> List[Event]:
         tzid = None
         if ";" in left:
             key, params = left.split(";", 1)
-            # e.g. DTSTART;TZID=Europe/Kyiv:...
             m = re.search(r"TZID=([^;]+)", params)
             if m:
                 tzid = m.group(1)
@@ -250,10 +263,6 @@ TYPE_WORDS = {
 
 
 def split_summary(summary: str) -> Tuple[str, Optional[str]]:
-    """
-    Google summary often: "Дисципліна — Лекція" / "Дисципліна — Практичне"
-    We return: (discipline, type)
-    """
     s = summary.strip()
     parts = [p.strip() for p in s.split("—")]
     if len(parts) >= 2:
@@ -262,7 +271,6 @@ def split_summary(summary: str) -> Tuple[str, Optional[str]]:
             if k in tail:
                 return ("—".join(parts[:-1]).strip(), v)
 
-    # also try '-' dash
     parts2 = [p.strip() for p in s.split("-")]
     if len(parts2) >= 2:
         tail = parts2[-1].lower()
@@ -273,41 +281,24 @@ def split_summary(summary: str) -> Tuple[str, Optional[str]]:
     return (s, None)
 
 
-# ----------------------------
-# LINK FIX: normalize text for link extraction
-# ----------------------------
 def _normalize_for_links(text: str) -> str:
     if not text:
         return ""
-    # Some sources may contain literal "\n"
     t = text.replace("\\n", "\n")
-    # remove zero-width spaces sometimes present in copied links
     t = t.replace("\u200b", "")
     return t
 
 
 def extract_zoom_links(text: str) -> List[str]:
-    """
-    LINK FIX:
-    - Use strict URL_RE (no Cyrillic), so words like "ідентифікатор" can't be part of URL.
-    - Prefer zoom links, but keep others after.
-    """
     t = _normalize_for_links(text)
     links = URL_RE.findall(t)
 
-    # Prefer zoom links
     zoom = [l for l in links if "zoom.us" in l.lower()]
     rest = [l for l in links if l not in zoom]
     return zoom + rest
 
 
 def extract_teacher(description: str) -> Optional[str]:
-    """
-    Looks for lines like:
-      "Доц.: Плещан Х.В."
-      "доц. Применко В.Г."
-      "Викл. Руденко А.В."
-    """
     if not description:
         return None
     lines = [l.strip() for l in description.replace("\\n", "\n").splitlines() if l.strip()]
@@ -343,17 +334,12 @@ def extract_passcode(description: str) -> Optional[str]:
 
 
 def classify_place(location: str, description: str) -> str:
-    """
-    Return a human-friendly place line.
-    """
     blob = f"{location}\n{description}".lower()
-    # online hints
     if "online" in blob or "zoom" in blob:
         m = re.search(r"(ауд\.?\s*\d+)", blob, flags=re.IGNORECASE)
         if m:
             return f"🌐 Online (Zoom) • 🏫 {m.group(1).replace('ауд', 'ауд.').strip()}"
         return "🌐 Online (Zoom)"
-    # auditorium
     m2 = re.search(r"(ауд\.?\s*\d+)", blob, flags=re.IGNORECASE)
     if m2:
         return f"🏫 {m2.group(1).replace('ауд', 'ауд.').strip()}"
@@ -366,10 +352,6 @@ def classify_place(location: str, description: str) -> str:
 # Weather (Dnipro) via Open-Meteo (no API key)
 # ----------------------------
 def get_weather_dnipro(day: dt.date) -> Optional[Dict]:
-    """
-    Returns dict with: desc, tmin, tmax, precip_prob_max
-    """
-    # Dnipro coords
     lat, lon = 48.45, 34.98
 
     url = (
@@ -487,13 +469,18 @@ def format_day(events: List[Event], day: dt.date) -> str:
     for ev in events:
         discipline, etype = split_summary(ev.summary)
         teacher = extract_teacher(ev.description)
-        passcode = extract_passcode(ev.description)
+        # ✅ Search passcode in description + location (more robust)
+        passcode = extract_passcode(ev.description + "\n" + ev.location)
         place = classify_place(ev.location, ev.description)
 
         links = extract_zoom_links(ev.description + "\n" + ev.location)
         link = links[0] if links else None
 
-        lines.append(f"🕒 <b>{hhmm(ev.start)}–{hhmm(ev.end)}</b>")
+        pno = pair_no(ev.start)
+        pfx = f"{pno} пара " if pno else ""
+
+        # If you want ⏰ instead of 🕒, replace here:
+        lines.append(f"🕒 <b>{pfx}{hhmm(ev.start)}–{hhmm(ev.end)}</b>")
         lines.append(f"📚 <b>{escape_html(discipline)}</b>")
         if etype:
             lines.append(f"🎓 {etype}")
@@ -506,8 +493,10 @@ def format_day(events: List[Event], day: dt.date) -> str:
             lines.append(f'🔗 <a href="{href}">Відкрити Zoom</a>')
             lines.append(f"📎 <code>{escape_html(link)}</code>")
 
+        # ✅ Copy-friendly passcode (like link)
         if passcode:
-            lines.append(f"🔑 Код доступу: <b>{escape_html(passcode)}</b>")
+            lines.append("🔑 Код доступу:")
+            lines.append(f"📎 <code>{escape_html(passcode)}</code>")
 
         lines.append("")
 
@@ -576,7 +565,7 @@ def main():
     chat_id = env_required("TG_CHAT_ID")
     ics_url = env_required("GCAL_ICS_URL")
 
-    schedule_thread_id = env_optional_int("TG_SCHEDULE_THREAD_ID")  # used for weekly thread posting
+    schedule_thread_id = env_optional_int("TG_SCHEDULE_THREAD_ID")
 
     state = load_state()
 
