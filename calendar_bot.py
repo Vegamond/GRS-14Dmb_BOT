@@ -42,7 +42,7 @@ def pair_no(t: dt.datetime) -> Optional[int]:
 
 
 # ----------------------------
-# Moodle links per discipline (independent of lecture/practice)
+# Moodle links per discipline
 # ----------------------------
 MOODLE_LINKS = {
     "Безпека життєдіяльності та охорона праці": "https://distance.kuk.edu.ua/mod/attendance/view.php?id=179093",
@@ -62,7 +62,11 @@ def normalize_discipline(name: str) -> str:
     return " ".join((name or "").replace("’", "'").split()).casefold()
 
 
-MOODLE_LINKS_NORM = {normalize_discipline(k): v for k, v in MOODLE_LINKS.items() if v}
+MOODLE_LINKS_NORM = {
+    normalize_discipline(k): v
+    for k, v in MOODLE_LINKS.items()
+    if v
+}
 
 
 # ----------------------------
@@ -156,7 +160,7 @@ def is_sunday(day: dt.date) -> bool:
 
 
 # ----------------------------
-# ICS parsing (minimal, robust-enough for Google Calendar ICS)
+# ICS parsing
 # ----------------------------
 def fetch_ics(url: str, timeout_s: int = 30) -> str:
     resp = requests.get(url, timeout=timeout_s)
@@ -252,9 +256,11 @@ def parse_ics_events(ics_text: str) -> List[Event]:
 
         if ":" not in line:
             continue
+
         left, value = line.split(":", 1)
         key = left
         tzid = None
+
         if ";" in left:
             key, params = left.split(";", 1)
             m = re.search(r"TZID=([^;]+)", params)
@@ -281,7 +287,7 @@ def events_in_range(events: List[Event], start_date: dt.date, end_date: dt.date)
 
 
 # ----------------------------
-# Extractors (teacher, type, zoom link, passcode)
+# Extractors
 # ----------------------------
 UA_DOW = {
     0: "Понеділок",
@@ -293,43 +299,48 @@ UA_DOW = {
     6: "Неділя",
 }
 
-TYPE_WORDS = {
-    "лекція": "Лекція",
-    "практич": "Практичне",
-    "лаб": "Лабораторна",
-    "семінар": "Семінар",
-}
+
+def detect_type(tail: str) -> Optional[str]:
+    t = tail.strip().lower()
+    if "лекц" in t:
+        return "Лекція"
+    if "практ" in t or t == "пр." or t == "пр":
+        return "Практичне"
+    if "лаб" in t:
+        return "Лабораторна"
+    if "семінар" in t:
+        return "Семінар"
+    return None
 
 
 def split_summary(summary: str) -> Tuple[str, Optional[str]]:
     s = summary.strip()
 
     # Формат: "Дисципліна — Лекція"
-    parts = [p.strip() for p in s.split("—")]
-    if len(parts) >= 2:
-        tail = parts[-1].lower()
-        for k, v in TYPE_WORDS.items():
-            if k in tail:
-                return ("—".join(parts[:-1]).strip(), v)
+    if "—" in s:
+        left, right = s.rsplit("—", 1)
+        etype = detect_type(right)
+        if etype:
+            return left.strip(), etype
 
     # Формат: "Дисципліна - Лекція"
-    parts2 = [p.strip() for p in s.split("-")]
-    if len(parts2) >= 2:
-        tail = parts2[-1].lower()
-        for k, v in TYPE_WORDS.items():
-            if k in tail:
-                return ("-".join(parts2[:-1]).strip(), v)
+    # Важливо: беремо тільки останній роздільник, щоб не ламати готельно-ресторанних
+    if " - " in s:
+        left, right = s.rsplit(" - ", 1)
+        etype = detect_type(right)
+        if etype:
+            return left.strip(), etype
 
     # Формат: "Дисципліна (лекція)" / "Дисципліна (практика)"
     m = re.match(r"^(.*?)\s*\(([^()]*)\)\s*$", s)
     if m:
         base = m.group(1).strip()
-        tail = m.group(2).strip().lower()
-        for k, v in TYPE_WORDS.items():
-            if k in tail:
-                return (base, v)
+        tail = m.group(2).strip()
+        etype = detect_type(tail)
+        if etype:
+            return base, etype
 
-    return (s, None)
+    return s, None
 
 
 def _normalize_for_links(text: str) -> str:
@@ -351,6 +362,7 @@ def extract_zoom_links(text: str) -> List[str]:
 def extract_teacher(description: str) -> Optional[str]:
     if not description:
         return None
+
     lines = [l.strip() for l in description.splitlines() if l.strip()]
     patterns = [
         r"^(?:доц\.?|доцент)\s*[:\-]?\s*(.+)$",
@@ -361,6 +373,7 @@ def extract_teacher(description: str) -> Optional[str]:
         r"^(?:Викл\.?|Викладач)\s*[:\-]?\s*(.+)$",
         r"^(?:Проф\.?|Професор)\s*[:\-]?\s*(.+)$",
     ]
+
     for line in lines:
         for pat in patterns:
             m = re.match(pat, line, flags=re.IGNORECASE)
@@ -372,12 +385,13 @@ def extract_teacher(description: str) -> Optional[str]:
 def extract_passcode(text: str) -> Optional[str]:
     if not text:
         return None
-    t = text.replace("\\n", "\n")
 
+    t = text.replace("\\n", "\n")
     patterns = [
         r"(?:Код\s*доступу|Код\s*доступа|Passcode|Пароль)\s*[:=\-]\s*([^\s,;]+)",
         r"(?:^|\n)\s*Код\s*[:=\-]\s*([^\s,;]+)",
     ]
+
     for pat in patterns:
         m = re.search(pat, t, flags=re.IGNORECASE)
         if m:
@@ -387,21 +401,25 @@ def extract_passcode(text: str) -> Optional[str]:
 
 def classify_place(location: str, description: str) -> str:
     blob = f"{location}\n{description}".lower()
+
     if "online" in blob or "zoom" in blob:
         m = re.search(r"(ауд\.?\s*\d+)", blob, flags=re.IGNORECASE)
         if m:
             return f"🌐 Online (Zoom) • 🏫 {m.group(1).replace('ауд', 'ауд.').strip()}"
         return "🌐 Online (Zoom)"
+
     m2 = re.search(r"(ауд\.?\s*\d+)", blob, flags=re.IGNORECASE)
     if m2:
         return f"🏫 {m2.group(1).replace('ауд', 'ауд.').strip()}"
+
     if location.strip():
         return f"📍 {location.strip()}"
+
     return "📍 (місце не вказано)"
 
 
 # ----------------------------
-# Weather (Dnipro) via Open-Meteo (no API key)
+# Weather (Dnipro) via Open-Meteo
 # ----------------------------
 def get_weather_dnipro(day: dt.date) -> Optional[Dict]:
     lat, lon = 48.45, 34.98
@@ -464,19 +482,22 @@ def weathercode_ua(code: int) -> str:
         96: "гроза з градом",
         99: "гроза з градом",
     }
-    return mapping.get(code, "погода (код: %s)" % code)
+    return mapping.get(code, f"погода (код: {code})")
 
 
 def format_weather_block(day: dt.date, label: str) -> str:
     w = get_weather_dnipro(day)
     if not w:
         return ""
-    lines = []
-    lines.append(f"⛅ Погода в Дніпрі на {label}:")
-    lines.append(f"• {w['desc']}")
-    lines.append(f"• 🌡️ Мін/Макс: {w['tmin']}°C / {w['tmax']}°C")
+
+    lines = [
+        f"⛅ Погода в Дніпрі на {label}:",
+        f"• {w['desc']}",
+        f"• 🌡️ Мін/Макс: {w['tmin']}°C / {w['tmax']}°C",
+    ]
     if w.get("p") is not None:
         lines.append(f"• ☔ Ймовірність опадів: {w['p']}%")
+
     return "\n".join(lines) + "\n\n"
 
 
@@ -520,7 +541,6 @@ def format_day(events: List[Event], day: dt.date) -> str:
     for ev in events:
         discipline, etype = split_summary(ev.summary)
         teacher = extract_teacher(ev.description)
-
         passcode = extract_passcode(ev.description + "\n" + ev.location + "\n" + ev.summary)
         place = classify_place(ev.location, ev.description)
 
@@ -535,23 +555,22 @@ def format_day(events: List[Event], day: dt.date) -> str:
         lines.append(f"🕒 <b>{pfx}{hhmm(ev.start)}–{hhmm(ev.end)}</b>")
         lines.append(f"📚 <b>{escape_html(discipline)}</b>")
 
-        # Moodle: only functional button
         if moodle_url:
             href_m = escape_html_attr(moodle_url)
             lines.append(f'📘 <a href="{href_m}">Відкрити Moodle</a>')
 
         if etype:
             lines.append(f"🎓 {etype}")
+
         if teacher:
             lines.append(f"👩‍🏫 {escape_html(teacher)}")
+
         lines.append(escape_html(place))
 
-        # Zoom: only functional button
         if link:
             href = escape_html_attr(link)
             lines.append(f'🔗 <a href="{href}">Відкрити Zoom</a>')
 
-        # Leave only passcode for easy copying
         if passcode:
             lines.append("🔑 Код доступу:")
             lines.append(f"📎 <code>{escape_html(passcode)}</code>")
@@ -571,8 +590,10 @@ def format_week_message(events: List[Event], start_day: dt.date, end_day: dt.dat
     )
 
     by_day: Dict[dt.date, List[Event]] = {
-        start_day + dt.timedelta(days=i): [] for i in range((end_day - start_day).days + 1)
+        start_day + dt.timedelta(days=i): []
+        for i in range((end_day - start_day).days + 1)
     }
+
     for ev in events:
         by_day[ev.start.astimezone(KYIV_TZ).date()].append(ev)
 
@@ -601,6 +622,7 @@ def tg_send_message(
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+
     if message_thread_id is not None:
         payload["message_thread_id"] = message_thread_id
 
@@ -633,8 +655,6 @@ def main():
     today = now_kyiv().date()
 
     if args.mode == "today":
-        # Saturday: no posts
-        # Sunday: no "today" post
         if is_saturday(today) or is_sunday(today):
             print("Skipping 'today': no today-posts on Saturday or Sunday.")
             return
@@ -660,8 +680,6 @@ def main():
         print("Posted today schedule.")
 
     elif args.mode == "tomorrow":
-        # Saturday: no posts
-        # Sunday evening "tomorrow" is allowed
         if is_saturday(today):
             print("Skipping 'tomorrow': no posts on Saturday.")
             return
@@ -687,12 +705,11 @@ def main():
         print("Posted tomorrow schedule.")
 
     elif args.mode == "week":
-        # Weekly post is intended for Sunday run
         if not is_sunday(today):
             print("Skipping 'week': weekly post should run on Sunday only.")
             return
 
-        this_monday = today - dt.timedelta(days=today.weekday())  # Monday=0
+        this_monday = today - dt.timedelta(days=today.weekday())
         next_monday = this_monday + dt.timedelta(days=7)
         next_sunday = next_monday + dt.timedelta(days=6)
 
@@ -706,6 +723,7 @@ def main():
 
         if schedule_thread_id is None:
             print("WARNING: TG_SCHEDULE_THREAD_ID not set. Weekly post will go to general chat.")
+
         tg_send_message(token, chat_id, msg, message_thread_id=schedule_thread_id)
 
         mark_posted(state, "last_week", stamp)
