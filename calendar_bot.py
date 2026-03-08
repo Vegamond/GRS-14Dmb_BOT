@@ -303,6 +303,8 @@ TYPE_WORDS = {
 
 def split_summary(summary: str) -> Tuple[str, Optional[str]]:
     s = summary.strip()
+
+    # Формат: "Дисципліна — Лекція"
     parts = [p.strip() for p in s.split("—")]
     if len(parts) >= 2:
         tail = parts[-1].lower()
@@ -310,12 +312,22 @@ def split_summary(summary: str) -> Tuple[str, Optional[str]]:
             if k in tail:
                 return ("—".join(parts[:-1]).strip(), v)
 
+    # Формат: "Дисципліна - Лекція"
     parts2 = [p.strip() for p in s.split("-")]
     if len(parts2) >= 2:
         tail = parts2[-1].lower()
         for k, v in TYPE_WORDS.items():
             if k in tail:
                 return ("-".join(parts2[:-1]).strip(), v)
+
+    # Формат: "Дисципліна (лекція)" / "Дисципліна (практика)"
+    m = re.match(r"^(.*?)\s*\(([^()]*)\)\s*$", s)
+    if m:
+        base = m.group(1).strip()
+        tail = m.group(2).strip().lower()
+        for k, v in TYPE_WORDS.items():
+            if k in tail:
+                return (base, v)
 
     return (s, None)
 
