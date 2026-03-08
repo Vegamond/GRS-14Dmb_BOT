@@ -42,6 +42,44 @@ def pair_no(t: dt.datetime) -> Optional[int]:
 
 
 # ----------------------------
+# Moodle links per discipline (independent of lecture/practice)
+# ----------------------------
+MOODLE_LINKS = {
+    "Безпека життєдіяльності та охорона праці": "https://distance.kuk.edu.ua/mod/attendance/view.php?id=179093",
+    "Основи правознавства": "https://distance.kuk.edu.ua/mod/attendance/view.php?id=179091",
+    "Устаткування готельно-ресторанних комплексів": "https://distance.kuk.edu.ua/mod/attendance/view.php?id=178888",
+    "Маркетинг, реклама та PR готельно-ресторанного і туристичного бізнесу": "https://distance.kuk.edu.ua/course/view.php?id=8577",
+    "Енологія і еногастрономія": "https://distance.kuk.edu.ua/course/view.php?id=8576",
+    "Ресторанне обслуговування: організація і технології": "https://distance.kuk.edu.ua/mod/attendance/view.php?id=147491",
+    "Готельне обслуговування: організація і технології": "https://distance.kuk.edu.ua/course/view.php?id=7724",
+    "Економіка підприємства": "https://distance.kuk.edu.ua/course/view.php?id=5778",
+    "Психологія": "https://distance.kuk.edu.ua/mod/attendance/view.php?id=179013",
+    "Документаційне забезпечення управління": "https://distance.kuk.edu.ua/mod/attendance/view.php?id=179019",
+}
+
+
+def normalize_discipline(name: str) -> str:
+    return " ".join((name or "").replace("’", "'").split()).casefold()
+
+
+MOODLE_LINKS_NORM = {normalize_discipline(k): v for k, v in MOODLE_LINKS.items() if v}
+
+
+# ----------------------------
+# iCal unescape (RFC5545)
+# ----------------------------
+def ics_unescape(s: str) -> str:
+    if not s:
+        return ""
+    return (s
+            .replace(r"\n", "\n")
+            .replace(r"\N", "\n")
+            .replace(r"\,", ",")
+            .replace(r"\;", ";")
+            .replace(r"\\", "\\"))
+
+
+# ----------------------------
 # Models
 # ----------------------------
 @dataclass
@@ -80,9 +118,6 @@ def save_state(state: Dict) -> None:
 
 
 def should_post(state: Dict, key: str, stamp: str) -> bool:
-    """
-    Simple dedupe: post only if last_stamp != stamp
-    """
     last = state.get(key)
     return last != stamp
 
@@ -109,6 +144,18 @@ def env_optional_int(name: str) -> Optional[int]:
 
 
 # ----------------------------
+# Posting policy by weekday
+# Monday=0 ... Sunday=6
+# ----------------------------
+def is_saturday(day: dt.date) -> bool:
+    return day.weekday() == 5
+
+
+def is_sunday(day: dt.date) -> bool:
+    return day.weekday() == 6
+
+
+# ----------------------------
 # ICS parsing (minimal, robust-enough for Google Calendar ICS)
 # ----------------------------
 def fetch_ics(url: str, timeout_s: int = 30) -> str:
@@ -118,9 +165,6 @@ def fetch_ics(url: str, timeout_s: int = 30) -> str:
 
 
 def _unfold_ics_lines(ics_text: str) -> List[str]:
-    """
-    RFC5545 line folding: lines starting with space/tab continue previous line.
-    """
     raw = ics_text.splitlines()
     out = []
     for line in raw:
@@ -138,12 +182,6 @@ def _unfold_ics_lines(ics_text: str) -> List[str]:
 
 
 def _parse_dt(value: str, tzid: Optional[str]) -> dt.datetime:
-    """
-    Handles:
-      - YYYYMMDDTHHMMSSZ (UTC)
-      - YYYYMMDDTHHMMSS (local, interpret as tzid if provided, else Kyiv)
-      - YYYYMMDD (all-day) -> treat as 00:00 in tzid/Kyiv
-    """
     value = value.strip()
     if re.fullmatch(r"\d{8}", value):
         d = dt.datetime.strptime(value, "%Y%m%d").date()
@@ -175,9 +213,9 @@ def parse_ics_events(ics_text: str) -> List[Event]:
 
         dtstart_tz, dtstart_val = cur.get("DTSTART", (None, ""))
         dtend_tz, dtend_val = cur.get("DTEND", (None, ""))
-        summary = cur.get("SUMMARY", (None, ""))[1]
-        description = cur.get("DESCRIPTION", (None, ""))[1]
-        location = cur.get("LOCATION", (None, ""))[1]
+        summary_raw = cur.get("SUMMARY", (None, ""))[1]
+        description_raw = cur.get("DESCRIPTION", (None, ""))[1]
+        location_raw = cur.get("LOCATION", (None, ""))[1]
 
         if not dtstart_val or not dtend_val:
             cur = {}
@@ -186,12 +224,16 @@ def parse_ics_events(ics_text: str) -> List[Event]:
         start = _parse_dt(dtstart_val, dtstart_tz)
         end = _parse_dt(dtend_val, dtend_tz)
 
+        summary = ics_unescape(summary_raw).strip()
+        description = ics_unescape(description_raw).strip()
+        location = ics_unescape(location_raw).strip()
+
         events.append(Event(
             start=start,
             end=end,
-            summary=summary.strip(),
-            description=description.strip(),
-            location=location.strip(),
+            summary=summary,
+            description=description,
+            location=location,
         ))
         cur = {}
 
@@ -230,9 +272,6 @@ def parse_ics_events(ics_text: str) -> List[Event]:
 
 
 def events_in_range(events: List[Event], start_date: dt.date, end_date: dt.date) -> List[Event]:
-    """
-    inclusive date-range by start date in Kyiv time.
-    """
     out = []
     for ev in events:
         d = ev.start.astimezone(KYIV_TZ).date()
@@ -292,7 +331,6 @@ def _normalize_for_links(text: str) -> str:
 def extract_zoom_links(text: str) -> List[str]:
     t = _normalize_for_links(text)
     links = URL_RE.findall(t)
-
     zoom = [l for l in links if "zoom.us" in l.lower()]
     rest = [l for l in links if l not in zoom]
     return zoom + rest
@@ -301,7 +339,7 @@ def extract_zoom_links(text: str) -> List[str]:
 def extract_teacher(description: str) -> Optional[str]:
     if not description:
         return None
-    lines = [l.strip() for l in description.replace("\\n", "\n").splitlines() if l.strip()]
+    lines = [l.strip() for l in description.splitlines() if l.strip()]
     patterns = [
         r"^(?:доц\.?|доцент)\s*[:\-]?\s*(.+)$",
         r"^(?:викл\.?|викладач)\s*[:\-]?\s*(.+)$",
@@ -319,12 +357,14 @@ def extract_teacher(description: str) -> Optional[str]:
     return None
 
 
-def extract_passcode(description: str) -> Optional[str]:
-    if not description:
+def extract_passcode(text: str) -> Optional[str]:
+    if not text:
         return None
-    t = description.replace("\\n", "\n")
+    t = text.replace("\\n", "\n")
+
     patterns = [
-        r"(?:Код доступу|Код доступа|Passcode|Пароль)\s*[:\-]?\s*([A-Za-zА-Яа-я0-9\-_]+)",
+        r"(?:Код\s*доступу|Код\s*доступа|Passcode|Пароль)\s*[:=\-]\s*([^\s,;]+)",
+        r"(?:^|\n)\s*Код\s*[:=\-]\s*([^\s,;]+)",
     ]
     for pat in patterns:
         m = re.search(pat, t, flags=re.IGNORECASE)
@@ -353,7 +393,6 @@ def classify_place(location: str, description: str) -> str:
 # ----------------------------
 def get_weather_dnipro(day: dt.date) -> Optional[Dict]:
     lat, lon = 48.45, 34.98
-
     url = (
         "https://api.open-meteo.com/v1/forecast"
         f"?latitude={lat}&longitude={lon}"
@@ -469,31 +508,38 @@ def format_day(events: List[Event], day: dt.date) -> str:
     for ev in events:
         discipline, etype = split_summary(ev.summary)
         teacher = extract_teacher(ev.description)
-        # ✅ Search passcode in description + location (more robust)
-        passcode = extract_passcode(ev.description + "\n" + ev.location)
+
+        passcode = extract_passcode(ev.description + "\n" + ev.location + "\n" + ev.summary)
         place = classify_place(ev.location, ev.description)
 
         links = extract_zoom_links(ev.description + "\n" + ev.location)
         link = links[0] if links else None
 
+        moodle_url = MOODLE_LINKS_NORM.get(normalize_discipline(discipline))
+
         pno = pair_no(ev.start)
         pfx = f"{pno} пара " if pno else ""
 
-        # If you want ⏰ instead of 🕒, replace here:
         lines.append(f"🕒 <b>{pfx}{hhmm(ev.start)}–{hhmm(ev.end)}</b>")
         lines.append(f"📚 <b>{escape_html(discipline)}</b>")
+
+        # Moodle: only functional button
+        if moodle_url:
+            href_m = escape_html_attr(moodle_url)
+            lines.append(f'📘 <a href="{href_m}">Відкрити Moodle</a>')
+
         if etype:
             lines.append(f"🎓 {etype}")
         if teacher:
             lines.append(f"👩‍🏫 {escape_html(teacher)}")
         lines.append(escape_html(place))
 
+        # Zoom: only functional button
         if link:
             href = escape_html_attr(link)
             lines.append(f'🔗 <a href="{href}">Відкрити Zoom</a>')
-            lines.append(f"📎 <code>{escape_html(link)}</code>")
 
-        # ✅ Copy-friendly passcode (like link)
+        # Leave only passcode for easy copying
         if passcode:
             lines.append("🔑 Код доступу:")
             lines.append(f"📎 <code>{escape_html(passcode)}</code>")
@@ -575,6 +621,12 @@ def main():
     today = now_kyiv().date()
 
     if args.mode == "today":
+        # Saturday: no posts
+        # Sunday: no "today" post
+        if is_saturday(today) or is_sunday(today):
+            print("Skipping 'today': no today-posts on Saturday or Sunday.")
+            return
+
         target = today
         stamp = f"today:{iso_date(target)}"
         if not should_post(state, "last_today", stamp):
@@ -596,6 +648,12 @@ def main():
         print("Posted today schedule.")
 
     elif args.mode == "tomorrow":
+        # Saturday: no posts
+        # Sunday evening "tomorrow" is allowed
+        if is_saturday(today):
+            print("Skipping 'tomorrow': no posts on Saturday.")
+            return
+
         target = today + dt.timedelta(days=1)
         stamp = f"tomorrow:{iso_date(target)}"
         if not should_post(state, "last_tomorrow", stamp):
@@ -617,7 +675,11 @@ def main():
         print("Posted tomorrow schedule.")
 
     elif args.mode == "week":
-        # ✅ NEXT WEEK (Mon–Sun)
+        # Weekly post is intended for Sunday run
+        if not is_sunday(today):
+            print("Skipping 'week': weekly post should run on Sunday only.")
+            return
+
         this_monday = today - dt.timedelta(days=today.weekday())  # Monday=0
         next_monday = this_monday + dt.timedelta(days=7)
         next_sunday = next_monday + dt.timedelta(days=6)
