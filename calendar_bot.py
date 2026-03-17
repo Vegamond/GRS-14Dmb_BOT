@@ -316,22 +316,18 @@ def detect_type(tail: str) -> Optional[str]:
 def split_summary(summary: str) -> Tuple[str, Optional[str]]:
     s = summary.strip()
 
-    # Формат: "Дисципліна — Лекція"
     if "—" in s:
         left, right = s.rsplit("—", 1)
         etype = detect_type(right)
         if etype:
             return left.strip(), etype
 
-    # Формат: "Дисципліна - Лекція"
-    # Важливо: беремо тільки останній роздільник, щоб не ламати готельно-ресторанних
     if " - " in s:
         left, right = s.rsplit(" - ", 1)
         etype = detect_type(right)
         if etype:
             return left.strip(), etype
 
-    # Формат: "Дисципліна (лекція)" / "Дисципліна (практика)"
     m = re.match(r"^(.*?)\s*\(([^()]*)\)\s*$", s)
     if m:
         base = m.group(1).strip()
@@ -710,9 +706,9 @@ def main():
         print("Posted tomorrow schedule.")
 
     elif args.mode == "week":
-    if not args.force and not is_sunday(today):
-        print("Skipping 'week': weekly post should run on Sunday only.")
-        return
+        if not args.force and not is_sunday(today):
+            print("Skipping 'week': weekly post should run on Sunday only.")
+            return
 
         this_monday = today - dt.timedelta(days=today.weekday())
         next_monday = this_monday + dt.timedelta(days=7)
