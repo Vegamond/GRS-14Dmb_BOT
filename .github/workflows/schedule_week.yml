@@ -31,7 +31,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TG_SCHEDULE_THREAD_ID: ${{ secrets.TG_SCHEDULE_THREAD_ID }}
         run: |
-          python calendar_bot.py week
+          python calendar_bot.py week --force
 
       - name: Commit state
         run: |
