@@ -639,6 +639,11 @@ def tg_send_message(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["today", "tomorrow", "week"], help="Posting mode")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force post even if weekday restrictions would normally skip it"
+    )
     args = parser.parse_args()
 
     token = env_required("TG_BOT_TOKEN")
@@ -705,9 +710,9 @@ def main():
         print("Posted tomorrow schedule.")
 
     elif args.mode == "week":
-        if not is_sunday(today):
-            print("Skipping 'week': weekly post should run on Sunday only.")
-            return
+    if not args.force and not is_sunday(today):
+        print("Skipping 'week': weekly post should run on Sunday only.")
+        return
 
         this_monday = today - dt.timedelta(days=today.weekday())
         next_monday = this_monday + dt.timedelta(days=7)
