@@ -711,16 +711,23 @@ def main():
             return
 
         this_monday = today - dt.timedelta(days=today.weekday())
-        next_monday = this_monday + dt.timedelta(days=7)
-        next_sunday = next_monday + dt.timedelta(days=6)
 
-        stamp = f"week:{iso_date(next_monday)}:{iso_date(next_sunday)}"
+        if args.force:
+            week_start = this_monday
+            week_end = week_start + dt.timedelta(days=6)
+            print("Force mode enabled: posting current week.")
+        else:
+            week_start = this_monday + dt.timedelta(days=7)
+            week_end = week_start + dt.timedelta(days=6)
+            print("Regular Sunday mode: posting next week.")
+
+        stamp = f"week:{iso_date(week_start)}:{iso_date(week_end)}"
         if not should_post(state, "last_week", stamp):
             print("Already posted weekly schedule for this week-range. Exiting.")
             return
 
-        week_events = events_in_range(all_events, next_monday, next_sunday)
-        msg = format_week_message(week_events, next_monday, next_sunday)
+        week_events = events_in_range(all_events, week_start, week_end)
+        msg = format_week_message(week_events, week_start, week_end)
 
         if schedule_thread_id is None:
             print("WARNING: TG_SCHEDULE_THREAD_ID not set. Weekly post will go to general chat.")
@@ -729,8 +736,7 @@ def main():
 
         mark_posted(state, "last_week", stamp)
         save_state(state)
-        print("Posted weekly schedule (next week).")
-
+        print("Posted weekly schedule.")
 
 if __name__ == "__main__":
     main()
