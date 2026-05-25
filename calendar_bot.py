@@ -310,6 +310,12 @@ def detect_type(tail: str) -> Optional[str]:
         return "Лабораторна"
     if "семінар" in t:
         return "Семінар"
+    if "консультація" in t:
+        return "Консультація"
+    if "іспит" in t:
+        return "Іспит"
+    if "залік" in t:
+        return "Залік"
     return None
 
 
