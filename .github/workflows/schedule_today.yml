@@ -1,4 +1,4 @@
-name: Schedule - Today
+#name: Schedule - Today
 
 on:
   schedule:
