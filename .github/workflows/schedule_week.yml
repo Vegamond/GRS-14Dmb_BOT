@@ -2,7 +2,7 @@ name: Schedule - Week
 
 on:
   schedule:
-    - cron: "0 17 * * 0"  # Sunday 19:00 Kyiv (UTC+2 winter) => 17:00 UTC
+    - cron: "#0 17 * * 0"  # Sunday 19:00 Kyiv (UTC+2 winter) => 17:00 UTC
   workflow_dispatch:
 
 permissions:
